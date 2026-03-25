@@ -129,6 +129,23 @@ export async function run(args: string[]): Promise<void> {
     }
   }
 
+  // Test container→host gateway connectivity (Linux + Docker only)
+  let gatewayReachable: boolean | undefined;
+  if (buildOk && testOk && runtime === 'docker') {
+    try {
+      const result = execSync(
+        `docker run --rm --add-host=host.docker.internal:host-gateway ${image} sh -c "curl -sf -m 5 http://host.docker.internal:10254/api/health || wget -qO- --timeout=5 http://host.docker.internal:10254/api/health" 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 15000 },
+      );
+      gatewayReachable = result.includes('"ok"');
+    } catch {
+      gatewayReachable = false;
+      logger.warn(
+        'Container cannot reach OneCLI gateway on host — if UFW is active, run: sudo ufw allow in on docker0 to any port 10254 && sudo ufw allow in on docker0 to any port 10255',
+      );
+    }
+  }
+
   const status = buildOk && testOk ? 'success' : 'failed';
 
   emitStatus('SETUP_CONTAINER', {
@@ -136,6 +153,7 @@ export async function run(args: string[]): Promise<void> {
     IMAGE: image,
     BUILD_OK: buildOk,
     TEST_OK: testOk,
+    ...(gatewayReachable !== undefined ? { GATEWAY_REACHABLE: gatewayReachable } : {}),
     STATUS: status,
     LOG: 'logs/setup.log',
   });
